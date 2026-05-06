@@ -37,3 +37,63 @@ export function runQuery(query: VisualQuery): Promise<RunResult> {
   })
 }
 
+export function runSql(sql: string, limit = 200, offset = 0): Promise<RunResult> {
+  return apiFetch('/api/sql/run', {
+    method: 'POST',
+    body: JSON.stringify({ sql, limit, offset }),
+  })
+}
+
+export type ColumnType = 'integer' | 'text' | 'boolean' | 'timestamp' | 'float'
+
+export type CreateTableRequest = {
+  schema?: string
+  table: string
+  columns: {
+    name: string
+    type: ColumnType
+    primaryKey?: boolean
+    nullable?: boolean
+    unique?: boolean
+  }[]
+}
+
+export function createTable(req: CreateTableRequest): Promise<{ ok: true; sql: string }> {
+  return apiFetch('/api/admin/table/create', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function renameTable(req: { schema?: string; from: string; to: string }): Promise<{ ok: true; sql: string }> {
+  return apiFetch('/api/admin/table/rename', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export function deleteTable(req: { schema?: string; table: string }): Promise<{ ok: true; sql: string }> {
+  return apiFetch('/api/admin/table/delete', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+
+export type AlterOp =
+  | {
+      type: 'addColumn'
+      column: { name: string; type: ColumnType; nullable?: boolean; unique?: boolean }
+    }
+  | { type: 'dropColumn'; columnName: string }
+  | { type: 'renameColumn'; from: string; to: string }
+  | { type: 'changeType'; columnName: string; newType: ColumnType }
+  | { type: 'setNullable'; columnName: string; nullable: boolean }
+  | { type: 'setUnique'; columnName: string; unique: boolean }
+
+export function alterTable(req: { schema?: string; table: string; op: AlterOp }): Promise<{ ok: true; sql: string }> {
+  return apiFetch('/api/admin/table/alter', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+}
+

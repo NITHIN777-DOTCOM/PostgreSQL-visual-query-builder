@@ -4,7 +4,18 @@ import cors from "cors";
 import { createPool } from "./db.js";
 import { getEnv } from "./env.js";
 import { indexSchema, loadDatabaseSchema } from "./schema.js";
-import { generateSql, VisualQuerySchema } from "./sqlBuilder.js";
+import { buildSql, generateSql, VisualQuerySchema } from "./sqlBuilder.js";
+import { ManualSqlRequestSchema, validateManualSql, wrapPaged } from "./safeSql.js";
+import {
+  AlterTableSchema,
+  CreateTableSchema,
+  DeleteTableSchema,
+  RenameTableSchema,
+  alterTable,
+  createTable,
+  deleteTable,
+  renameTable,
+} from "./admin.js";
 
 const env = getEnv();
 const pool = createPool(env.DATABASE_URL);
@@ -48,8 +59,9 @@ app.post("/api/query/run", async (req, res) => {
     const schema = await loadDatabaseSchema(pool);
     const idx = indexSchema(schema);
     const vq = VisualQuerySchema.parse(req.body);
-    const sql = generateSql(vq, idx);
-    const result = await pool.query(sql);
+    const built = buildSql(vq, idx);
+    const sql = built.sql + ";";
+    const result = await pool.query(built.sql, built.params);
     res.json({
       sql,
       rowCount: result.rowCount ?? 0,
@@ -58,6 +70,68 @@ app.post("/api/query/run", async (req, res) => {
     });
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/api/sql/run", async (req, res) => {
+  try {
+    const parsed = ManualSqlRequestSchema.parse(req.body);
+    const { baseSql } = validateManualSql(parsed.sql);
+    const { pagedSql, countSql, params } = wrapPaged(baseSql, parsed.limit, parsed.offset);
+
+    const [paged, count] = await Promise.all([pool.query(pagedSql, params), pool.query<{ total: number }>(countSql)]);
+
+    res.json({
+      sql: baseSql + ";",
+      limit: parsed.limit,
+      offset: parsed.offset,
+      totalCount: count.rows[0]?.total ?? 0,
+      rowCount: paged.rowCount ?? 0,
+      fields: paged.fields.map((f) => ({ name: f.name, dataTypeID: f.dataTypeID })),
+      rows: paged.rows,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/api/admin/table/create", async (req, res) => {
+  try {
+    const parsed = CreateTableSchema.parse(req.body);
+    const result = await createTable(pool, parsed);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/api/admin/table/rename", async (req, res) => {
+  try {
+    const parsed = RenameTableSchema.parse(req.body);
+    const result = await renameTable(pool, parsed.schema, parsed.from, parsed.to);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/api/admin/table/delete", async (req, res) => {
+  try {
+    const parsed = DeleteTableSchema.parse(req.body);
+    const result = await deleteTable(pool, parsed.schema, parsed.table);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post("/api/admin/table/alter", async (req, res) => {
+  try {
+    const parsed = AlterTableSchema.parse(req.body);
+    const result = await alterTable(pool, parsed);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
   }
 });
 
