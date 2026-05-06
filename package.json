@@ -1,0 +1,19 @@
+{
+  "name": "postgresql-visual-query-builder",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "npm run dev -w frontend",
+    "dev:backend": "npm run dev -w backend",
+    "dev:all": "npm run dev -w backend & npm run dev -w frontend",
+    "build": "npm run build -w frontend && npm run build -w backend",
+    "lint": "npm run lint -w frontend && npm run lint -w backend"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

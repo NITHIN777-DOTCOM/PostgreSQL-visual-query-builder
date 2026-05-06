@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16
+    container_name: vqb-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vqb
+    ports:
+      - "5432:5432"
+    volumes:
+      - vqb_pg_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  vqb_pg_data:
+
