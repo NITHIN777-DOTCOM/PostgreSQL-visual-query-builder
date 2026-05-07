@@ -61,6 +61,44 @@ body,
   letter-spacing: 0.2px;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+
+.brandLogo {
+  width: 26px;
+  height: 26px;
+  border-radius: 10px;
+  display: block;
+  transition: transform 180ms ease, filter 220ms ease;
+  filter: drop-shadow(0 0 10px rgba(124, 58, 237, 0.16));
+}
+
+.brand:hover .brandLogo {
+  transform: translateY(-1px) scale(1.03);
+  filter: drop-shadow(0 0 14px rgba(124, 58, 237, 0.26));
+}
+
+.brandTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.1;
+}
+
+.brandTitle strong {
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.brandTitle span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .muted {
   color: var(--muted);
   font-size: 12px;

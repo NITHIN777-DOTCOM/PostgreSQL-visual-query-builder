@@ -1,5 +1,10 @@
 import { VisualQueryBuilderPage } from './builder/VisualQueryBuilderPage'
+import { ToastProvider } from './builder/ui/toast'
 
 export default function App() {
-  return <VisualQueryBuilderPage />
+  return (
+    <ToastProvider>
+      <VisualQueryBuilderPage />
+    </ToastProvider>
+  )
 }

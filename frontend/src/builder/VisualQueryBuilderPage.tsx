@@ -11,12 +11,15 @@ import ReactFlow, {
   type EdgeChange,
   type NodeChange,
 } from 'reactflow'
-import { fetchSchema, generateSql, runSql } from './api'
+import { execSql, fetchSchema, generateSql } from './api'
 import { TableNode } from './TableNode'
 import { useBuilderStore, type TableNode as TableNodeT } from './store'
 import { CreateTableModal } from './schema/CreateTableModal'
 import { ConfirmDeleteTableModal, EditColumnsModal, RenameTableModal } from './schema/TableActionsModals'
 import { Menu, MenuItem } from './ui/Menu'
+import { useToast } from './ui/toast'
+import { Modal } from './ui/Modal'
+import { RowEditorModal } from './rows/RowEditorModal'
 
 const nodeTypes = { tableNode: TableNode }
 
@@ -33,6 +36,7 @@ function useDebouncedEffect(fn: () => void, deps: unknown[], delayMs: number) {
 }
 
 export function VisualQueryBuilderPage() {
+  const toast = useToast()
   const schema = useBuilderStore((s) => s.schema)
   const schemaError = useBuilderStore((s) => s.schemaError)
   const setSchema = useBuilderStore((s) => s.setSchema)
@@ -86,10 +90,13 @@ export function VisualQueryBuilderPage() {
   const [renameTarget, setRenameTarget] = useState<(typeof filteredTables)[number] | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<(typeof filteredTables)[number] | null>(null)
   const [editColsTarget, setEditColsTarget] = useState<(typeof filteredTables)[number] | null>(null)
+  const [rowsTarget, setRowsTarget] = useState<(typeof filteredTables)[number] | null>(null)
 
   const [queryOptionsOpen, setQueryOptionsOpen] = useState(false)
   const [runLoading, setRunLoading] = useState(false)
   const [pageOffset, setPageOffset] = useState(0)
+  const [sqlExpanded, setSqlExpanded] = useState(false)
+  const [resultsExpanded, setResultsExpanded] = useState(false)
 
   const reloadSchema = () => {
     fetchSchema()
@@ -181,7 +188,7 @@ export function VisualQueryBuilderPage() {
         })
     },
     // changes that impact SQL:
-    [nodes, edges, limit],
+    [nodes, edges, where, orderBy, groupBy, aggregations, limit],
     250,
   )
 
@@ -190,10 +197,19 @@ export function VisualQueryBuilderPage() {
     if (resetResult) setRunResult(null)
     setRunLoading(true)
     try {
-      const r = await runSql(editorSql || generatedSql, limit, offset)
+      const sqlToRun = editorSql || generatedSql
+      const r = await execSql(sqlToRun, limit, offset)
       setRunResult(r)
+      if (r.kind === 'select') {
+        toast.push({ kind: 'success', title: 'Query executed', message: `${r.totalCount ?? r.rowCount} rows` })
+      } else {
+        toast.push({ kind: 'success', title: 'SQL executed', message: `${r.rowCount} row(s) affected` })
+        if (r.shouldRefreshSchema) reloadSchema()
+      }
     } catch (e: unknown) {
-      setRunError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setRunError(msg)
+      toast.push({ kind: 'error', title: 'Execution failed', message: msg })
     } finally {
       setRunLoading(false)
     }
@@ -203,11 +219,139 @@ export function VisualQueryBuilderPage() {
     await execRun(0, true)
   }
 
+  const ResultsTable = (props: { compact?: boolean }) => {
+    const compact = props.compact ?? false
+    if (runLoading) {
+      return (
+        <div
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: 12,
+            background: 'rgba(0,0,0,0.25)',
+            padding: 14,
+            fontSize: 12,
+          }}
+          className="muted"
+        >
+          Running query…
+        </div>
+      )
+    }
+    if (!runResult) {
+      return (
+        <div className="muted" style={{ fontSize: 12 }}>
+          Run the generated SQL to see results here.
+        </div>
+      )
+    }
+
+    return (
+      <div
+        style={{
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          overflow: 'auto',
+          background: 'rgba(0,0,0,0.25)',
+          flex: 1,
+          maxHeight: compact ? 420 : undefined,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 10px',
+            borderBottom: '1px solid rgba(255,255,255,0.10)',
+            position: 'sticky',
+            top: 0,
+            background: 'rgba(0,0,0,0.55)',
+            zIndex: 1,
+          }}
+        >
+          <div className="muted" style={{ fontSize: 12 }}>
+            Showing {runResult.rows.length} rows
+            {typeof runResult.totalCount === 'number' ? ` (of ${runResult.totalCount})` : ''}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              className="btn"
+              disabled={pageOffset <= 0}
+              onClick={() => {
+                const next = Math.max(0, pageOffset - limit)
+                setPageOffset(next)
+                void execRun(next, false)
+              }}
+            >
+              Prev
+            </button>
+            <button
+              className="btn"
+              disabled={
+                typeof runResult.totalCount === 'number'
+                  ? pageOffset + limit >= runResult.totalCount
+                  : runResult.rows.length < limit
+              }
+              onClick={() => {
+                const next = pageOffset + limit
+                setPageOffset(next)
+                void execRun(next, false)
+              }}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr>
+              {runResult.fields.map((f) => (
+                <th
+                  key={f.name}
+                  style={{
+                    textAlign: 'left',
+                    padding: '10px 10px',
+                    borderBottom: '1px solid var(--border)',
+                    position: 'sticky',
+                    top: 44,
+                    background: 'rgba(0,0,0,0.55)',
+                  }}
+                >
+                  {f.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {runResult.rows.map((r, idx) => (
+              <tr key={idx} style={{ background: idx % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent' }}>
+                {runResult.fields.map((f) => (
+                  <td key={f.name} style={{ padding: '9px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <span style={{ fontFamily: 'var(--mono)' }}>
+                      {typeof r[f.name] === 'object' ? JSON.stringify(r[f.name]) : String(r[f.name] ?? '')}
+                    </span>
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   return (
     <div className="appShell">
       <aside className="panel">
         <div className="panelHeader">
-          <h1>Schema</h1>
+          <div className="brand" title="PostgreSQL Query Visualizer">
+            <img className="brandLogo" src="/ps-logo.svg" alt="PS" />
+            <div className="brandTitle">
+              <strong>PostgreSQL Query Visualizer</strong>
+              <span>Schema</span>
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btnPrimary" onClick={() => setCreateOpen(true)}>
               + Create Table
@@ -285,6 +429,13 @@ export function VisualQueryBuilderPage() {
                   anchorRef={menuAnchorRef as unknown as React.RefObject<HTMLElement>}
                 >
                   <MenuItem
+                    label="View rows"
+                    onClick={() => {
+                      setMenuTableKey(null)
+                      setRowsTarget(t)
+                    }}
+                  />
+                  <MenuItem
                     label="Rename table"
                     onClick={() => {
                       setMenuTableKey(null)
@@ -354,6 +505,9 @@ export function VisualQueryBuilderPage() {
         <div className="panelHeader">
           <h2>SQL</h2>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn" onClick={() => setSqlExpanded(true)} title="Expand SQL editor">
+              Expand
+            </button>
             <span className="muted">Limit</span>
             <input
               className="input"
@@ -703,120 +857,105 @@ export function VisualQueryBuilderPage() {
             </div>
           </div>
 
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <div />
+            <button className="btn" onClick={() => setResultsExpanded(true)} disabled={!runResult && !runLoading} title="Expand results">
+              Expand
+            </button>
+          </div>
+
           {runError ? <div style={{ color: 'var(--danger)', fontSize: 12 }}>Run error: {runError}</div> : null}
 
-          {runLoading ? (
-            <div
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: 12,
-                background: 'rgba(0,0,0,0.25)',
-                padding: 14,
-                fontSize: 12,
-              }}
-              className="muted"
-            >
-              Running query…
-            </div>
-          ) : runResult ? (
-            <div
-              style={{
-                border: '1px solid var(--border)',
-                borderRadius: 12,
-                overflow: 'auto',
-                background: 'rgba(0,0,0,0.25)',
-                flex: 1,
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '10px 10px',
-                  borderBottom: '1px solid rgba(255,255,255,0.10)',
-                  position: 'sticky',
-                  top: 0,
-                  background: 'rgba(0,0,0,0.55)',
-                  zIndex: 1,
-                }}
-              >
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Showing {runResult.rows.length} rows
-                  {typeof runResult.totalCount === 'number' ? ` (of ${runResult.totalCount})` : ''}
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button
-                    className="btn"
-                    disabled={pageOffset <= 0}
-                    onClick={() => {
-                      const next = Math.max(0, pageOffset - limit)
-                      setPageOffset(next)
-                      void execRun(next, false)
-                    }}
-                  >
-                    Prev
-                  </button>
-                  <button
-                    className="btn"
-                    disabled={
-                      typeof runResult.totalCount === 'number'
-                        ? pageOffset + limit >= runResult.totalCount
-                        : runResult.rows.length < limit
-                    }
-                    onClick={() => {
-                      const next = pageOffset + limit
-                      setPageOffset(next)
-                      void execRun(next, false)
-                    }}
-                  >
-                    Next
-                  </button>
-                </div>
-              </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    {runResult.fields.map((f) => (
-                      <th
-                        key={f.name}
-                        style={{
-                          textAlign: 'left',
-                          padding: '10px 10px',
-                          borderBottom: '1px solid var(--border)',
-                          position: 'sticky',
-                          top: 44,
-                          background: 'rgba(0,0,0,0.55)',
-                        }}
-                      >
-                        {f.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {runResult.rows.map((r, idx) => (
-                    <tr key={idx}>
-                      {runResult.fields.map((f) => (
-                        <td key={f.name} style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                          <span style={{ fontFamily: 'var(--mono)' }}>
-                            {typeof r[f.name] === 'object' ? JSON.stringify(r[f.name]) : String(r[f.name] ?? '')}
-                          </span>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="muted" style={{ fontSize: 12 }}>
-              Run the generated SQL to see results here.
-            </div>
-          )}
+          <ResultsTable compact />
         </div>
       </aside>
+
+      <Modal
+        open={sqlExpanded}
+        onClose={() => setSqlExpanded(false)}
+        title="SQL Editor"
+        width={980}
+        heightVh={90}
+        footer={
+          <>
+            <button className="btn" onClick={() => setSqlExpanded(false)}>
+              Back
+            </button>
+            <button className="btn btnPrimary" onClick={handleRun} disabled={runLoading || (!generatedSql && !editorSql) || !!sqlError}>
+              {runLoading ? 'Running…' : 'Run'}
+            </button>
+          </>
+        }
+      >
+        {sqlError ? (
+          <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 10 }}>SQL error: {sqlError}</div>
+        ) : null}
+
+        <textarea
+          className="codeBox"
+          style={{
+            width: '100%',
+            height: '62vh',
+            resize: 'none',
+            borderRadius: 14,
+            padding: 14,
+            lineHeight: 1.45,
+          }}
+          value={editorSql}
+          onChange={(e) => {
+            setEditorSql(e.target.value)
+            setEditorDirty(true)
+          }}
+          placeholder="Write SQL manually or generate visually..."
+        />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 10 }}>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {editorDirty ? 'Running uses the SQL editor content.' : 'Auto-filled from the visual builder (until you edit).'}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span className="muted" style={{ fontSize: 12 }}>
+              Limit
+            </span>
+            <input
+              className="input"
+              style={{ width: 130, padding: '8px 10px' }}
+              value={limit}
+              onChange={(e) => setLimit(Number(e.target.value || 200))}
+              inputMode="numeric"
+            />
+            <button
+              className="btn"
+              onClick={() => {
+                setEditorSql(generatedSql)
+                setEditorDirty(false)
+              }}
+              disabled={!generatedSql}
+              title="Replace editor with generated SQL"
+            >
+              Reset to generated
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={resultsExpanded}
+        onClose={() => setResultsExpanded(false)}
+        title="Results"
+        width={1120}
+        heightVh={90}
+        footer={
+          <>
+            <button className="btn" onClick={() => setResultsExpanded(false)}>
+              Back
+            </button>
+          </>
+        }
+      >
+        {runError ? <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 10 }}>Run error: {runError}</div> : null}
+        <ResultsTable />
+      </Modal>
 
       <CreateTableModal
         open={createOpen}
@@ -852,6 +991,8 @@ export function VisualQueryBuilderPage() {
           onDone={() => reloadSchema()}
         />
       ) : null}
+
+      {rowsTarget ? <RowEditorModal open={!!rowsTarget} onClose={() => setRowsTarget(null)} table={rowsTarget} /> : null}
     </div>
   )
 }

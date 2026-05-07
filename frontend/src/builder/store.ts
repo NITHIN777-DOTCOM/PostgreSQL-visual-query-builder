@@ -249,15 +249,43 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
         .map(([col]) => ({ nodeId: n.id, column: col })),
     )
 
+    const getColumnType = (nodeId: string, col: string) => {
+      const n = nodes.find((x) => x.id === nodeId)
+      return n?.data.columns.find((c) => c.name === col)?.dataType ?? 'text'
+    }
+
+    const parseWhereValue = (raw: string, dataType: string, op: WhereOp) => {
+      const trimmed = raw.trim()
+      if (!trimmed.length) return null
+      if (op === 'LIKE') return trimmed
+      const t = dataType.toLowerCase()
+      if (t.includes('bool')) {
+        if (/^(true|1)$/i.test(trimmed)) return true
+        if (/^(false|0)$/i.test(trimmed)) return false
+        return trimmed
+      }
+      if (t.includes('int') || t.includes('numeric') || t.includes('double') || t.includes('real') || t.includes('float') || t.includes('decimal')) {
+        const n = Number(trimmed)
+        return Number.isFinite(n) ? n : trimmed
+      }
+      // timestamp/date types: keep as string; postgres will parse where possible
+      return trimmed
+    }
+
     const whereOut = where
       .filter((w) => w.nodeId && w.column && w.op)
-      .map((w) => ({
-        boolean: w.boolean,
-        nodeId: w.nodeId,
-        column: w.column,
-        op: w.op,
-        value: w.value,
-      }))
+      .map((w) => {
+        const dt = getColumnType(w.nodeId, w.column)
+        const parsed = parseWhereValue(w.value, dt, w.op)
+        return {
+          boolean: w.boolean,
+          nodeId: w.nodeId,
+          column: w.column,
+          op: w.op,
+          value: parsed,
+        }
+      })
+      .filter((w) => w.value !== null)
 
     const orderOut = orderBy
       .filter((o) => o.nodeId && o.column)

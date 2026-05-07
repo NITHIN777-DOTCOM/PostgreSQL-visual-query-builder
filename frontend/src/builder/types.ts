@@ -2,6 +2,7 @@ export type ColumnInfo = {
   name: string
   dataType: string
   isNullable: boolean
+  isPrimaryKey: boolean
 }
 
 export type TableInfo = {
@@ -54,5 +55,10 @@ export type RunResult = {
   rowCount: number
   fields: { name: string; dataTypeID: number }[]
   rows: Record<string, unknown>[]
+}
+
+export type SqlExecResult = RunResult & {
+  kind: 'select' | 'insert' | 'update' | 'delete'
+  shouldRefreshSchema: boolean
 }
 

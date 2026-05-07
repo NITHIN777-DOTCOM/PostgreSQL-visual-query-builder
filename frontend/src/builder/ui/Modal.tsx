@@ -7,6 +7,7 @@ export function Modal(props: {
   children: ReactNode
   footer?: ReactNode
   width?: number
+  heightVh?: number
 }) {
   const { open, onClose } = props
 
@@ -43,12 +44,14 @@ export function Modal(props: {
         style={{
           width: props.width ?? 680,
           maxWidth: '100%',
-          maxHeight: '85vh',
+          maxHeight: `${props.heightVh ?? 85}vh`,
           overflow: 'hidden',
           borderRadius: 16,
           border: '1px solid rgba(255,255,255,0.14)',
           background: 'rgba(10, 14, 26, 0.92)',
           boxShadow: 'rgba(0,0,0,0.6) 0 18px 50px',
+          transform: 'translateY(0)',
+          transition: 'transform 180ms ease, opacity 180ms ease',
         }}
       >
         <div
@@ -67,7 +70,9 @@ export function Modal(props: {
           </button>
         </div>
 
-        <div style={{ padding: 14, overflow: 'auto', maxHeight: 'calc(85vh - 120px)' }}>{props.children}</div>
+        <div style={{ padding: 14, overflow: 'auto', maxHeight: `calc(${props.heightVh ?? 85}vh - 120px)` }}>
+          {props.children}
+        </div>
 
         {props.footer ? (
           <div
